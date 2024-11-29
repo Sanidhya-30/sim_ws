@@ -31,7 +31,6 @@ from collections import defaultdict
 map_name = '/home/lucifer/sim_ws/src/turtlebot3_gazebo/maps/map'
 # map_name = '/home/lucifer/sim_ws/src/turtlebot3_gazebo/maps/map'
 
-
 ## CLASS FOR MAP
 class Map():
     def __init__(self, map_name):
@@ -76,7 +75,6 @@ class Map():
                 else:
                     img_array[i,j] = 0
         return img_array
-
 
 ## CLASS FOR QUEUE
 class Queue():
@@ -126,7 +124,6 @@ class Queue():
         self.end = len(self.queue)-1
         return p
 
-
 # CLASS FOR TREE
 class Tree():
     def __init__(self,name):
@@ -171,7 +168,7 @@ class Tree():
         self.root = False
         self.end = True
 
-
+## CLASS FOR NODES
 class Nodes():
     def __init__(self,name):
         self.name = name
@@ -187,8 +184,7 @@ class Nodes():
         self.children.extend(node)
         self.weight.extend(w)
 
-
-# ## CLASS TO PROCESS MAP
+## CLASS TO PROCESS MAP
 class MapProcessor():
     def __init__(self,name):
         self.map = Map(name)
@@ -302,66 +298,7 @@ class MapProcessor():
             path_array[tup] = 0.5
         return path
 
-
-## CLASS FOR A STAR
-# class AStar():
-#     def __init__(self,in_tree):
-#         self.in_tree = in_tree
-#         self.q = Queue()
-#         self.dist = {name:np.Inf for name,node in in_tree.g.items()}
-#         self.h = {name:0 for name,node in in_tree.g.items()}
-
-#         for name,node in in_tree.g.items():
-#             start = tuple(map(int, name.split(',')))
-#             end = tuple(map(int, self.in_tree.end.split(',')))
-#             self.h[name] = np.sqrt((end[0]-start[0])**2 + (end[1]-start[1])**2)
-
-#         self.via = {name:0 for name,node in in_tree.g.items()}
-#         for __,node in in_tree.g.items():
-#             self.q.push(node)
-
-#     def __get_f_score(self,node):
-#         idx = node.name
-#         return self.dist[idx] + self.h[idx]
-
-#     def solve(self, sn, en):
-#       self.dist[sn.name] = 0
-#       self.q.push(sn)
-
-#       while len(self.q) > 0:
-#           current_node = min(self.q.queue, key=lambda n: self.__get_f_score(n))
-#           self.q.queue.remove(current_node)
-
-#           if current_node.name == en.name:
-#               break
-
-#           for i in range(len(current_node.children)):
-#               child = current_node.children[i]
-#               weight = current_node.weight[i]
-
-#               tentative_g_score = self.dist[current_node.name] + weight
-
-#               if tentative_g_score < self.dist[child.name]:
-#                   self.dist[child.name] = tentative_g_score
-#                   self.via[child.name] = current_node.name
-
-#                   if child not in self.q.queue:
-#                       self.q.push(child)
-
-#     def reconstruct_path(self,sn,en):
-#         path = []
-#         node = en.name
-#         dist = self.dist[node]
-#         node = en.name
-#         while node != sn.name:
-#           path.append(node)
-#           node = self.via[node]
-
-#         path.append(sn.name)
-#         path.reverse()
-#         return path,dist
-
-
+## CLASS TO PROCESS A*
 class AStar():
     def __init__(self, in_tree):
         self.in_tree = in_tree
@@ -422,9 +359,8 @@ class AStar():
         return path, total_dist
 
 
-
-
-class Navigation(Node):
+## Main Class
+class Task2(Node):
 
     def __init__(self, node_name='Navigation'):
 
@@ -528,23 +464,23 @@ class Navigation(Node):
         return angle
 
     def PID_angular(self, angular_error):
-        kp_ang, kd_ang, ki_ang, dt = 25, 15.5, 0.01, 0.1
+        kp_ang, kd_ang, ki_ang, dt = 35, 35.5, 0.0001, 0.1
         self.ang_integral_error += angular_error * dt
         self.ang_integral_error = max(min(self.ang_integral_error, 1), -1)  # Anti-windup
         ang_derivative = (angular_error - self.ang_previous_error) / dt
         self.ang_previous_error = angular_error
         self.ang_vel = (kp_ang * angular_error) + (ki_ang * self.ang_integral_error) + (kd_ang * ang_derivative)
-        self.ang_vel = min(max(abs(self.ang_vel), 0.0), 0.5)
+        self.ang_vel = min(max(abs(self.ang_vel), 0.0), 0.35)
         return self.ang_vel
 
     def PID_linear(self, linear_error):
-        kp_lin, kd_lin, ki_lin, dt = 15.0, 2.5, 0.001, 0.1
+        kp_lin, kd_lin, ki_lin, dt = 5.0, 2.5, 0.001, 0.1
         self.lin_integral_error += linear_error * dt
         self.lin_integral_error = max(min(self.lin_integral_error, 1.0), -1.0)  # Anti-windup
         lin_derivative = (linear_error - self.lin_previous_error) / dt
         self.lin_previous_error = linear_error
         self.lin_vel = (kp_lin * linear_error) + (ki_lin * self.lin_integral_error) + (kd_lin * lin_derivative)
-        self.lin_vel = min(max(self.lin_vel, 0.0), 0.25)
+        self.lin_vel = min(max(self.lin_vel, 0.0), 0.35)
         return self.lin_vel
     
     def reached_goal(self, current_pose, target_pose, tolerance=0.15):
@@ -614,8 +550,8 @@ class Navigation(Node):
 
 
     def path_follower(self, vehicle_pose, current_goal, prev_goal):
-        linear_error_margin = 0.25
-        angular_error_margin = 0.10
+        linear_error_margin = 0.35
+        angular_error_margin = 0.12
 
         vehicle_x = vehicle_pose.pose.position.x
         vehicle_y = vehicle_pose.pose.position.y
@@ -642,8 +578,8 @@ class Navigation(Node):
         if ((abs(lin_ex)<linear_error_margin)) and ((abs(lin_ey)<linear_error_margin)) and (abs(angle_diff)<angular_error_margin):
             self.wp_reached = True
             self.get_logger().info('waypoint reached')
-            speed = 0.05
-            heading = 0.001
+            speed = self.PID_linear(distance_to_goal)
+            heading = self.PID_angular(abs(angle_diff)) if angle_diff > 0 else -self.PID_angular(abs(angle_diff))
         else: 
             self.wp_reached = False
             # self.get_logger().warn(f" G {self.index} {round(target_angle, 2)} {round(goal_x, 2)} {round(goal_y, 2)}")
@@ -759,7 +695,7 @@ class Navigation(Node):
 def main(args=None):
 
     rclpy.init(args=args)
-    nav = Navigation(node_name='Navigation')
+    nav = Task2(node_name='Navigation')
     try:
         nav.run()
     except KeyboardInterrupt:

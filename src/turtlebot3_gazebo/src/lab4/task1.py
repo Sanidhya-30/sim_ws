@@ -195,7 +195,7 @@ class Task1(Node):
 
     def PID_Yaw(self, yaw_error):
         """PID controller for yaw correction."""
-        kp_ang, kd_ang, ki_ang, dt = 25, 25.5, 0.0001, 0.1
+        kp_ang, kd_ang, ki_ang, dt = 25, 30.5, 0.0001, 0.1
         self.ang_integral_error += yaw_error * dt
         self.ang_integral_error = max(min(self.ang_integral_error, 1), -1)
         ang_derivative = (yaw_error - self.ang_previous_error) / dt

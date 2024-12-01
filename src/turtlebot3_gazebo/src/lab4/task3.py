@@ -13,15 +13,19 @@ from rclpy.node import Node
 import rclpy.time
 
 from geometry_msgs.msg import PoseStamped, PoseWithCovarianceStamped, Pose, Twist, PointStamped
+from sensor_msgs.msg import Image
+from vision_msgs.msg import BoundingBox2D
+from cv_bridge import CvBridge, CvBridgeError
 from nav_msgs.msg import Path
 
+import cv2
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 from mpl_toolkits.mplot3d import Axes3D
 from scipy.ndimage import convolve
-from PIL import Image, ImageOps
+# from PIL import Image, ImageOps
 from graphviz import Graph
 from copy import copy, deepcopy
 from collections import defaultdict
@@ -44,39 +48,32 @@ class Map():
         ax.plot()
         return ""
 
-    def __open_map(self,map_name):
-        # Open the YAML file which contains the map name and other
-        # configuration parameters
-        f = open(map_name + '.yaml', 'r')
-        map_df = pd.json_normalize(yaml.safe_load(f))
-        # Open the map image
-        # map_name = map_df.image[0]
-        im = Image.open(map_name+'.pgm')
-        size = 200, 200
-        im.thumbnail(size)
-        im = ImageOps.grayscale(im)
-        # Get the limits of the map. This will help to display the map
-        # with the correct axis ticks.
+    def __open_map(self, map_name):
+
+        with open(map_name + '.yaml', 'r') as f:
+            map_df = pd.json_normalize(yaml.safe_load(f))
+        
+        im = cv2.imread(map_name + '.pgm', cv2.IMREAD_GRAYSCALE)        
+        if im is None:
+            raise FileNotFoundError(f"Map image '{map_name}.pgm' not found.")
+        
+        size = (200, 200)
+        im = cv2.resize(im, size, interpolation=cv2.INTER_AREA)
+        
         xmin = map_df.origin[0][0]
-        xmax = map_df.origin[0][0] + im.size[0] * map_df.resolution[0]
+        xmax = map_df.origin[0][0] + im.shape[1] * map_df.resolution[0]
         ymin = map_df.origin[0][1]
-        ymax = map_df.origin[0][1] + im.size[1] * map_df.resolution[0]
+        ymax = map_df.origin[0][1] + im.shape[0] * map_df.resolution[0]
 
-        return im, map_df, [xmin,xmax,ymin,ymax]
+        return im, map_df, [xmin, xmax, ymin, ymax]
 
-    def __get_obstacle_map(self,map_im, map_df):
-        img_array = np.reshape(list(self.map_im.getdata()),(self.map_im.size[1],self.map_im.size[0]))
-        up_thresh = self.map_df.occupied_thresh[0]*255
-        low_thresh = self.map_df.free_thresh[0]*255
+    def __get_obstacle_map(self, map_im, map_df):
+        img_array = np.array(map_im)        
+        up_thresh = map_df.occupied_thresh[0] * 255
+        low_thresh = map_df.free_thresh[0] * 255
+        img_array = np.where(img_array > up_thresh, 255, 0).astype(np.uint8)
 
-        for j in range(self.map_im.size[0]):
-            for i in range(self.map_im.size[1]):
-                if img_array[i,j] > up_thresh:
-                    img_array[i,j] = 255
-                else:
-                    img_array[i,j] = 0
         return img_array
-
 
 ## CLASS FOR QUEUE
 class Queue():
@@ -126,7 +123,6 @@ class Queue():
         self.end = len(self.queue)-1
         return p
 
-
 # CLASS FOR TREE
 class Tree():
     def __init__(self,name):
@@ -171,7 +167,7 @@ class Tree():
         self.root = False
         self.end = True
 
-
+# CLASS FOR NODE
 class Nodes():
     def __init__(self,name):
         self.name = name
@@ -187,8 +183,7 @@ class Nodes():
         self.children.extend(node)
         self.weight.extend(w)
 
-
-# ## CLASS TO PROCESS MAP
+# CLASS TO PROCESS MAP
 class MapProcessor():
     def __init__(self,name):
         self.map = Map(name)
@@ -293,75 +288,14 @@ class MapProcessor():
         m = np.ones(shape=(size,size))
         return m
 
-    def draw_path(self,path):
-        path_tuple_list = []
-        path_array = copy(self.inf_map_img_array)
+    def draw_path(self, path):
+        path_array = self.inf_map_img_array.copy()
         for idx in path:
-            tup = tuple(map(int, idx.split(',')))
-            path_tuple_list.append(tup)
-            path_array[tup] = 0.5
-        return path
+            x, y = map(int, idx.split(','))
+            path_array[x, y] = 0.5 
+        return path_array
 
-
-## CLASS FOR A STAR
-# class AStar():
-#     def __init__(self,in_tree):
-#         self.in_tree = in_tree
-#         self.q = Queue()
-#         self.dist = {name:np.Inf for name,node in in_tree.g.items()}
-#         self.h = {name:0 for name,node in in_tree.g.items()}
-
-#         for name,node in in_tree.g.items():
-#             start = tuple(map(int, name.split(',')))
-#             end = tuple(map(int, self.in_tree.end.split(',')))
-#             self.h[name] = np.sqrt((end[0]-start[0])**2 + (end[1]-start[1])**2)
-
-#         self.via = {name:0 for name,node in in_tree.g.items()}
-#         for __,node in in_tree.g.items():
-#             self.q.push(node)
-
-#     def __get_f_score(self,node):
-#         idx = node.name
-#         return self.dist[idx] + self.h[idx]
-
-#     def solve(self, sn, en):
-#       self.dist[sn.name] = 0
-#       self.q.push(sn)
-
-#       while len(self.q) > 0:
-#           current_node = min(self.q.queue, key=lambda n: self.__get_f_score(n))
-#           self.q.queue.remove(current_node)
-
-#           if current_node.name == en.name:
-#               break
-
-#           for i in range(len(current_node.children)):
-#               child = current_node.children[i]
-#               weight = current_node.weight[i]
-
-#               tentative_g_score = self.dist[current_node.name] + weight
-
-#               if tentative_g_score < self.dist[child.name]:
-#                   self.dist[child.name] = tentative_g_score
-#                   self.via[child.name] = current_node.name
-
-#                   if child not in self.q.queue:
-#                       self.q.push(child)
-
-#     def reconstruct_path(self,sn,en):
-#         path = []
-#         node = en.name
-#         dist = self.dist[node]
-#         node = en.name
-#         while node != sn.name:
-#           path.append(node)
-#           node = self.via[node]
-
-#         path.append(sn.name)
-#         path.reverse()
-#         return path,dist
-
-
+# CLASS FOR A*
 class AStar():
     def __init__(self, in_tree):
         self.in_tree = in_tree
@@ -422,8 +356,7 @@ class AStar():
         return path, total_dist
 
 
-
-
+## Main Class
 class Task3(Node):
 
     def __init__(self, node_name='Navigation'):
@@ -435,13 +368,14 @@ class Task3(Node):
         self.goal_point = PointStamped()
 
         self.create_subscription(PoseStamped, '/move_base_simple/goal', self.__goal_pose_cbk, 10)
-        # self.create_subscription(PointStamped, '/robot/clicked_point', self.__goal_point_cbk, 10)
         self.create_subscription(PoseWithCovarianceStamped, '/amcl_pose', self.__ttbot_pose_cbk, 10)
-
+        self.create_subscription(Image, '/camera/image_raw', self.__cv_img_callback, 10)
+        self.img_pub = self.create_publisher(Image, 'video_data', 10)      
         self.path_pub = self.create_publisher(Path, '/plan', 10)
         self.cmd_vel_pub = self.create_publisher(Twist, '/cmd_vel', 10)
 
         self.rate = self.create_rate(10)
+        self.bridge = CvBridge()
 
         self.speed = 0
         self.heading = 0
@@ -450,21 +384,18 @@ class Task3(Node):
         self.ang_integral_error = 0
         self.ang_previous_error = 0
         self.wp_reached = False
+        self.obstacle = False
         self.index = 0
         self.prev_idx = 0
 
-        # self.world_dim = [3 ,2]
-        # self.graph_dim = [42, 60]
-        self.world_dim = [10 ,7]
+        self.world_dim = [10 ,10]
         self.graph_dim = [200, 140]
-        self.world_origin = [-1.75, -2]
-        # self.world_origin = [-1.5, -0.5]
-        self.graph_origin = [75, 55]
-        # self.graph_origin = [10, 35]
+        # self.world_origin = [-1.75, -2]
+        self.world_origin = [-1.15, -0.0]
+        self.graph_origin = [75, 75]
 
-        self.scale = [13,14]
+        self.scale = [13,20]
         self.res   = [20, 20] 
-
 
     def __goal_point_cbk(self, data):
         self.goal_point = data
@@ -474,6 +405,22 @@ class Task3(Node):
 
     def __ttbot_pose_cbk(self, data):
         self.ttbot_pose = data.pose
+
+    def __cv_img_callback(self, msg):
+        try:
+            frame = self.bridge.imgmsg_to_cv2(msg, desired_encoding='passthrough')
+            self.objects = self.process_image(frame)            
+            msg = Twist()
+            if len(self.objects) > 0:
+                self.obstacle = True
+                self.stop()
+                self.get_logger().error(f"Obstacle detected")
+            else:
+                self.obstacle = False
+                self.get_logger().warn(f"Path clear")
+            # frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        except CvBridgeError as e:
+            self.get_logger().error(f"Could not convert image: {e}")
 
 
     def graph2pose(self, graph_y, graph_x):
@@ -544,10 +491,10 @@ class Task3(Node):
         lin_derivative = (linear_error - self.lin_previous_error) / dt
         self.lin_previous_error = linear_error
         self.lin_vel = (kp_lin * linear_error) + (ki_lin * self.lin_integral_error) + (kd_lin * lin_derivative)
-        self.lin_vel = min(max(self.lin_vel, 0.0), 0.35)
+        self.lin_vel = min(max(self.lin_vel, 0.0), 0.25)
         return self.lin_vel
     
-    def reached_goal(self, current_pose, target_pose, tolerance=0.15):
+    def reached_goal(self, current_pose, target_pose, tolerance=0.25):
         dx = target_pose.pose.position.x - current_pose.pose.position.x
         dy = target_pose.pose.position.y - current_pose.pose.position.y
         distance = np.sqrt(dx ** 2 + dy ** 2)
@@ -584,8 +531,6 @@ class Task3(Node):
             path.poses.append(waypoint)
         return node_path, path
 
-
-
     def get_path_idx(self, vehicle_pose, path, prev_idx):
         min_distance = np.inf
         angle_threshold = 0.05
@@ -610,8 +555,6 @@ class Task3(Node):
             return closest_deviation_idx
         
         return (len(path.poses) - 1)
-
-
 
     def path_follower(self, vehicle_pose, current_goal, prev_goal):
         linear_error_margin = 0.35
@@ -650,15 +593,14 @@ class Task3(Node):
             if (abs(angle_diff) > angular_error_margin):
                 speed = 0.05 * distance_to_goal
                 heading = self.PID_angular(abs(angle_diff)) if angle_diff > 0 else -self.PID_angular(abs(angle_diff))
-                self.get_logger().warn(f" A {self.prev_idx} {self.index} {round(angle_diff, 2)} {round(distance_to_goal, 2)} ")
+                # self.get_logger().warn(f" A {self.prev_idx} {self.index} {round(angle_diff, 2)} {round(distance_to_goal, 2)} ")
             else:
                 speed = self.PID_linear(distance_to_goal)
                 heading = 0.05 * angle_diff 
                 # heading = self.PID_angular(abs(angle_diff)) if angle_diff > 0 else -self.PID_angular(abs(angle_diff))
-                self.get_logger().warn(f" L {self.prev_idx} {self.index} {round(angle_diff, 2)} {round(distance_to_goal, 2)} ")           
+                # self.get_logger().warn(f" L {self.prev_idx} {self.index} {round(angle_diff, 2)} {round(distance_to_goal, 2)} ")           
 
         return speed, heading
-
 
     def path_tracer(self, current_goal, prev_goal):
         goal_x = (current_goal.pose.position.x)
@@ -680,22 +622,24 @@ class Task3(Node):
         cmd_vel.angular.z = float(heading)
         # cmd_vel.linear.x = 0.0
         # cmd_vel.angular.z = 0.0
-        self.cmd_vel_pub.publish(cmd_vel)
+        if self.obstacle == False:
+            self.cmd_vel_pub.publish(cmd_vel)
+        else:
+            self.stop()
 
     def publish_path(self, poses):
         path_arr = Path()
         path_arr = poses
         path_arr.header.frame_id = "/map"
-        offset_x = 2.75
-        offset_y = 3
+        offset_x =  1.75
+        offset_y = 0 # 3
         for pose in path_arr.poses:
             pose.pose.position.x = 1.5 * (pose.pose.position.x) + offset_x
-            pose.pose.position.y = 1.5 * (pose.pose.position.y) + offset_y
+            pose.pose.position.y = 1.15 * (pose.pose.position.y) + offset_y
         self.path_pub.publish(path_arr)
 
     def display_path(self, path, node_path):
         path_arr_as = self.map.draw_path(node_path)
-        path_arr_as = path_arr_as.astype(float)
         x_coords = [pose.pose.position.x for pose in path.poses]
         y_coords = [pose.pose.position.y for pose in path.poses]
         mp = Map(map_name)
@@ -709,12 +653,48 @@ class Task3(Node):
         axes[1].set_title("Path Array")
         plt.show()
 
+    def stop(self, ang=0.0, lin=0.0):
+        msg = Twist()
+        msg.linear.x = ang
+        msg.angular.z = lin
+        self.cmd_vel_pub.publish(msg) 
 
+    def process_image(self, frame):
+        hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+        lower1 = np.array([0, 0, 0])  
+        upper1 = np.array([255, 255, 15])  
+        mask = cv2.inRange(hsv, lower1, upper1)
+        kernel = np.ones((5,5), np.uint8)
+        opening = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
+        # cv2.imshow('Object Detector', opening)
+        # cv2.waitKey(1)
+        H, W , _ = frame.shape
+        frame_area = H*W
+        contours, _ = cv2.findContours(opening, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+    
+        objects = []
+        for contour in contours:
+            area = cv2.contourArea(contour)
+            ratio = area/frame_area
+            # self.get_logger().error(f"Obstacle detected {area}")
+            if area > 350000: 
+            # if area > 0: 
+                x, y, w, h = cv2.boundingRect(contour)
+                cx, cy = x + w // 2, y + h // 2
+                objects.append([x, y, w, h, cx, cy])
+                self.get_logger().info("I see trash")
+                cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
+                cv2.putText(opening, str(area), (200, 1000), cv2.FONT_HERSHEY_SIMPLEX, 3, (255, 255, 255), 5 , cv2.LINE_AA)
+        
+        self.img_pub.publish(self.bridge.cv2_to_imgmsg(opening))
+        return objects
 
     def run(self):
         while rclpy.ok():
             rclpy.spin_once(self, timeout_sec=0.1)
-            if (self.goal_pose.pose.position.x != self.ttbot_pose.pose.position.x or self.goal_pose.pose.position.y != self.ttbot_pose.pose.position.y):
+            # print("here")
+            tol = 0.25
+            if (abs(self.goal_pose.pose.position.x-self.ttbot_pose.pose.position.x)>tol or abs(self.goal_pose.pose.position.y - self.ttbot_pose.pose.position.y)>tol):
                 self.get_logger().info('Planning path \n> from {}, {} \n> to {}, {}'.format(self.ttbot_pose.pose.position.x, self.ttbot_pose.pose.position.y, self.goal_pose.pose.position.x, self.goal_pose.pose.position.y))
                 node_path, path = self.a_star_path_planner(self.ttbot_pose, self.goal_pose)
                 self.publish_path(path)
@@ -735,7 +715,7 @@ class Task3(Node):
                             speed, heading = self.path_follower(self.ttbot_pose, current_goal, prev_goal)
                             self.move_ttbot(speed, heading)
                     
-                    
+                
                     # while (idx<=len(node_path)):
                     #     self.index = idx
                     #     self.prev_idx = idx-1                       
@@ -762,13 +742,13 @@ def main(args=None):
     task3 = Task3()
 
     try:
-        rclpy.spin(task3)
+        task3.run()
+        # rclpy.spin(task3)
     except KeyboardInterrupt:
         pass
     finally:
         task3.destroy_node()
         rclpy.shutdown()
-
 
 if __name__ == '__main__':
     main()

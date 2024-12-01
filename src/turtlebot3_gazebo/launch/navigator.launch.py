@@ -99,14 +99,14 @@ def generate_launch_description():
         ),
 
         # Task3 Algorithm Node (for dynamic obstacles)
-        Node(
-            package='turtlebot3_gazebo',
-            executable='task3.py',
-            name='task3_algorithm',
-            output='screen',
-            parameters=[{
-                'use_sim_time': LaunchConfiguration('use_sim_time')
-            }],
-            condition=IfCondition(LaunchConfiguration('use_dynamic_obstacles'))
-        )
+        # Node(
+        #     package='turtlebot3_gazebo',
+        #     executable='task3.py',
+        #     name='task3_algorithm',
+        #     output='screen',
+        #     parameters=[{
+        #         'use_sim_time': LaunchConfiguration('use_sim_time')
+        #     }],
+        #     condition=IfCondition(LaunchConfiguration('use_dynamic_obstacles'))
+        # )
     ])
